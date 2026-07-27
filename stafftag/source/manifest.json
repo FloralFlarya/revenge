@@ -1,0 +1,20 @@
+{
+    "name": "Staff Tags",
+    "description": "Shows OWNER, ADMIN, STAFF and moderator tags based on server permissions.",
+    "authors": [
+        {
+            "name": "Fiery",
+            "id": "890228870559698955"
+        },
+        {
+            "name": "siguma",
+            "id": "737597276339437578"
+        },
+        {
+            "name": "Flarya",
+            "id": "435847641041993759"
+        }
+    ],
+    "main": "src/index.ts"
+}
+
