@@ -536,7 +536,6 @@ function restoreDmNotifications(userId: string) {
 }
 
 function hideDirectMessages(userId: string, knownChannels = findDirectMessages(userId)) {
-    muteDmNotifications(userId, knownChannels);
     for (const channel of knownChannels) {
         hiddenDmChannels.set(userId, channel);
     }
