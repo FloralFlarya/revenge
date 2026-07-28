@@ -7,13 +7,13 @@
 Добавьте этот адрес в **Revenge → Plugins**:
 
 ```text
-https://FloralFlarya.github.io/block/
+https://FloralFlarya.github.io/revenge/blocklist/
 ```
 
 Если GitHub Pages ещё не включён, можно использовать прямой адрес:
 
 ```text
-https://raw.githubusercontent.com/FloralFlarya/block/main/
+https://raw.githubusercontent.com/FloralFlarya/revenge/main/blocklist/
 ```
 
 ## Команды
