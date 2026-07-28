@@ -7,13 +7,13 @@
 Добавьте этот адрес в **Revenge → Plugins**:
 
 ```text
-https://kirill9712.github.io/stafftag/
+https://FloralFlarya.github.io/stafftag/
 ```
 
 Если GitHub Pages ещё не включён, можно использовать прямой адрес:
 
 ```text
-https://raw.githubusercontent.com/Kirill9712/stafftag/main/
+https://raw.githubusercontent.com/FloralFlarya/stafftag/main/
 ```
 
 Плагин показывает должности исключительно по реальным разрешениям пользователя. Названия ролей не проверяются.
