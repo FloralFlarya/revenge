@@ -7,5 +7,5 @@
             "id": "435847641041993759"
         }
     ],
-    "main": "src/index.ts"
+    "main": "index.js"
 }
