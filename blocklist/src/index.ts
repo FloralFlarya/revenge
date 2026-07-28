@@ -24,6 +24,8 @@ const ChannelMemberStore = findByStoreName("ChannelMemberStore");
 const ThreadMemberListStore = findByStoreName("ThreadMemberListStore");
 const UserGuildSettingsStore = findByStoreName("UserGuildSettingsStore");
 const NotificationSettingsActions = findByProps("updateChannelOverrideSettings");
+const RelationshipActions = findByProps("ignoreUser") ?? findByProps("unignoreUser");
+const RestAPI = findByProps("get", "post", "put", "del");
 const hiddenDmChannels = new Map<string, any>();
 const hiddenVoiceStates = new Map<string, any>();
 const hiddenVoiceChannels = new Map<string, any>();
@@ -84,6 +86,21 @@ function success(message: string) {
 
 function failure(message: string) {
     showToast(message, getAssetIDByName("Small"));
+}
+
+async function setIgnored(userId: string, ignored: boolean) {
+    try {
+        const action = ignored ? RelationshipActions?.ignoreUser : RelationshipActions?.unignoreUser;
+        if (typeof action === "function") {
+            await action(userId);
+            return;
+        }
+        const url = `/users/@me/relationships/${userId}/ignore`;
+        if (ignored) await RestAPI?.put?.({ url });
+        else await RestAPI?.del?.({ url });
+    } catch (error) {
+        logger.warn(`Failed to ${ignored ? "ignore" : "unignore"} user`, error);
+    }
 }
 
 function savedVolumes(): AnyRecord {
@@ -982,6 +999,7 @@ function registerCommands() {
             const voiceState = currentVoiceState(userId);
             storage.users = [...blockedIds(), userId];
             refreshUnblockChoices();
+            void setIgnored(userId, true);
             muteVoice(userId);
             hideVoicePresence(userId, voiceState);
             removeMountedMessages(userId);
@@ -1003,13 +1021,14 @@ function registerCommands() {
 
             storage.users = blockedIds().filter(id => id !== userId);
             refreshUnblockChoices();
+            void setIgnored(userId, false);
             restoreHiddenMessages(userId);
             restoreVoice(userId);
             restoreVoicePresence(userId);
             restoreDmNotifications(userId);
             restoreDirectMessage(userId);
             refreshLists();
-            void refreshMessages();
+            setTimeout(() => void refreshMessages(), 600);
         }
     } as any));
 
@@ -1129,6 +1148,7 @@ export default {
         }, 1000);
         registerCommands();
         blockedIds().forEach(removeMountedMessages);
+        blockedIds().forEach(userId => void setIgnored(userId, true));
         blockedIds().forEach(muteVoice);
         blockedIds().forEach(userId => hideVoicePresence(userId));
         blockedIds().forEach(userId => hideDirectMessages(userId));
