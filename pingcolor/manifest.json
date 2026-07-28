@@ -1,0 +1,11 @@
+{
+    "name": "PingColor",
+    "description": "Customize the colors of mention/reply backgrounds and left bars in Discord",
+    "authors": [
+        {
+            "name": "Flarya",
+            "id": "435847641041993759"
+        }
+    ],
+    "main": "src/index.ts"
+}
