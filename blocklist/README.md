@@ -24,5 +24,3 @@ https://raw.githubusercontent.com/floralflarya/revenge/main/blocklist/
 В поле `user` можно выбрать человека или вставить Discord ID.
 
 Плагин скрывает сообщения, ответы, индикатор печати и пользователя в списках/войсе. Голос и Soundboard скрытых пользователей локально отключаются.
-
-Исходный код находится в [`src/index.ts`](src/index.ts).
