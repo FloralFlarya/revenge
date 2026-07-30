@@ -48,6 +48,7 @@ let patchedDmModules = new WeakSet<object>();
 let originalGetVoiceStateForUser: ((userId: string) => any) | undefined;
 let originalGetVoiceStatesForChannel: ((channelId: string) => any) | undefined;
 let pluginActive = false;
+const pendingIgnoreRequests = new Set<string>();
 
 function blockedIds(): string[] {
     storage.users ??= [];
@@ -88,18 +89,34 @@ function failure(message: string) {
     showToast(message, getAssetIDByName("Small"));
 }
 
+function ignoredIds(): string[] {
+    storage.ignoredUsers ??= [];
+    if (typeof storage.ignoredUsers === "string") storage.ignoredUsers = storage.ignoredUsers.match(/\d{17,20}/g) ?? [];
+    return [...new Set((storage.ignoredUsers as unknown[]).map(String).filter(id => /^\d{17,20}$/.test(id)))];
+}
+
 async function setIgnored(userId: string, ignored: boolean) {
+    if (pendingIgnoreRequests.has(userId)) return;
+    const currentIgnored = new Set(ignoredIds());
+    if (ignored && currentIgnored.has(userId)) return;
+    if (!ignored && !currentIgnored.has(userId)) return;
+    pendingIgnoreRequests.add(userId);
     try {
         const action = ignored ? RelationshipActions?.ignoreUser : RelationshipActions?.unignoreUser;
         if (typeof action === "function") {
             await action(userId);
-            return;
+        } else {
+            const url = `/users/@me/relationships/${userId}/ignore`;
+            if (ignored) await RestAPI?.put?.({ url });
+            else await RestAPI?.del?.({ url });
         }
-        const url = `/users/@me/relationships/${userId}/ignore`;
-        if (ignored) await RestAPI?.put?.({ url });
-        else await RestAPI?.del?.({ url });
+        if (ignored) currentIgnored.add(userId);
+        else currentIgnored.delete(userId);
+        storage.ignoredUsers = [...currentIgnored];
     } catch (error) {
         logger.warn(`Failed to ${ignored ? "ignore" : "unignore"} user`, error);
+    } finally {
+        pendingIgnoreRequests.delete(userId);
     }
 }
 
@@ -1127,6 +1144,7 @@ export default {
     onLoad() {
         pluginActive = true;
         storage.users ??= [];
+        storage.ignoredUsers ??= [];
         storage.voiceVolumes ??= {};
         storage.soundboardMutes ??= {};
         storage.dmNotificationSettings ??= {};
@@ -1179,6 +1197,7 @@ export default {
         [...hiddenVoiceChannels.keys()].forEach(restoreVoiceChannel);
         originalGetVoiceStateForUser = undefined;
         originalGetVoiceStatesForChannel = undefined;
+        pendingIgnoreRequests.clear();
         blockedIds().forEach(restoreVoice);
         logger.log("Blacklist unloaded");
     }
