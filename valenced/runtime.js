@@ -2,19 +2,20 @@
 function createCompatibility(api) {
     const v = api.unscoped;
     const { lookupModule, lookupModules, filters } = v.modules.finders;
-    let filterId = 0;
-    function matching(predicate) {
+    // These lookups always scan fresh exports, including modules loaded after startup
+    // Keep a bounded set of cache keys because Staff Tags retries as screens load
+    function matching(predicate, key = 'scan') {
         return filters.createFilterGenerator(
             (_, id, value) => Boolean(value && predicate(value)),
-            () => `flarya.compat.${++filterId}`,
+            () => `flarya.compat.${key}`,
         )();
     }
-    const findByProps = (...props) => lookupModule(filters.withProps(...props))[0];
+    const findByProps = (...props) => lookupModule(filters.withProps(...props), { cached: false })[0];
     const findByName = (name, defaultExport = true) =>
-        lookupModule(filters.withName(name), { returnNamespace: !defaultExport })[0];
-    const findAll = predicate => [...lookupModules(matching(predicate))].map(([value]) => value);
-    const findByStoreName = name => lookupModule(matching(value => value.getName?.() === name))[0];
-    const findByTypeNameAll = name => findAll(value => value.type?.name === name);
+        lookupModule(filters.withName(name), { returnNamespace: !defaultExport, cached: false })[0];
+    const findAll = predicate => [...lookupModules(matching(predicate), { cached: false })].map(([value]) => value);
+    const findByStoreName = name => lookupModule(matching(value => typeof value.getName === 'function' && value.getName() === name, `store.${name}`), { cached: false })[0];
+    const findByTypeNameAll = name => [...lookupModules(matching(value => value.type?.name === name, `type.${name}`), { cached: false })].map(([value]) => value);
 
     // Vendetta after hooks receive arguments and keep the result on undefined
     const after = (key, parent, hook) => v.patcher.instead(parent, key, function (args, original) {
@@ -71,7 +72,15 @@ function createCompatibility(api) {
         const toasts = v.discord.actions.ToastActionCreators;
         const key = `flarya-${Date.now()}`;
         if (toasts.open.length === 1) toasts.open({ key, content: text, icon });
-        else toasts.open(key, { text, icon });
+        else {
+            // Mana toasts render icon as a component, while Revenge passes an asset ID
+            const Icon = typeof icon === 'number'
+                ? props => v.react.React.createElement(v.react.ReactNative.Image, {
+                    ...props, source: icon, style: [{ width: 24, height: 24 }, props?.style],
+                })
+                : icon;
+            toasts.open(key, { text, icon: Icon });
+        }
     }
     const commands = [];
     let removeCommands;

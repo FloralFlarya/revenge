@@ -6,7 +6,27 @@ import { useProxy } from "@vendetta/storage";
 import { findInReactTree } from "@vendetta/utils";
 
 let cancelPatches: Array<() => void> = [];
-let startTimer: ReturnType<typeof setTimeout> | undefined;
+let startTimer: ReturnType<typeof setInterval> | undefined;
+let patchedMethods = new WeakMap<object, Set<string>>();
+
+function patchAfter(key: string, parent: any, hook: any) {
+    if (!parent || typeof parent[key] !== "function") return;
+    let keys = patchedMethods.get(parent);
+    if (keys?.has(key)) return;
+    const cancel = after(key, parent, hook);
+    if (!keys) patchedMethods.set(parent, keys = new Set());
+    keys.add(key);
+    cancelPatches.push(cancel);
+}
+
+// Stable Discord permission bits also cover clients whose Constants omit Permissions
+const PERMISSIONS = {
+    KICK_MEMBERS: 2n, BAN_MEMBERS: 4n, ADMINISTRATOR: 8n,
+    MANAGE_CHANNELS: 16n, MANAGE_GUILD: 32n, MANAGE_MESSAGES: 8192n,
+    MUTE_MEMBERS: 4194304n, DEAFEN_MEMBERS: 8388608n, MOVE_MEMBERS: 16777216n,
+    MANAGE_ROLES: 268435456n, MANAGE_WEBHOOKS: 536870912n, MODERATE_MEMBERS: 1099511627776n,
+    ...(constants as any)?.Permissions,
+};
 
 const BUILTIN_TAGS = new Set(["BOT", "APP", "SYSTEM", "SERVER", "AI", "AUTOMOD"]);
 const TAGS = [
@@ -62,6 +82,18 @@ function resolveTag(guild: any, channel: any, author: any, permissionModule: any
             overwrites: channel?.permissionOverwrites
         });
     } catch {}
+    if (computed == null) {
+        const members = findByProps("getMember", "getMembers") ?? findByStoreName("GuildMemberStore");
+        const roles = findByProps("getRole", "getRoles") ?? findByStoreName("GuildRoleStore");
+        const member = members?.getMember?.(guild.id, author.id);
+        const roleIds = [guild.id, ...(member?.roles ?? [])];
+        let combined = 0n;
+        for (const id of roleIds) {
+            const role = guild.roles?.[id] ?? guild.roles?.get?.(id) ?? roles?.getRole?.(guild.id, id);
+            try { combined |= BigInt(role?.permissions ?? 0); } catch {}
+        }
+        computed = combined;
+    }
     return TAGS.find(candidate =>
         (candidate.owner && (guild.ownerId ?? guild.owner_id) === author.id) ||
         ("permissions" in candidate && candidate.permissions.some(name => hasPermission(computed, permissions[name])))
@@ -124,16 +156,17 @@ function installChatPatch() {
     const ChannelStore = findByStoreName("ChannelStore") as any;
     const GuildMemberStore = (findByProps("getMember", "getMembers") ?? findByStoreName("GuildMemberStore")) as any;
     const permissionModule = findByProps("computePermissions", "canEveryoneRole") as any;
-    const permissions = (constants as any)?.Permissions ?? {};
+    const permissions = PERMISSIONS;
     if (typeof tagModule?.default !== "function") return;
+    if (!GuildStore?.getGuild || !ChannelStore?.getChannel) return;
 
-    cancelPatches.push(after("default", tagModule, (args, result) => {
+    patchAfter("default", tagModule, (args, result) => {
         try {
             const input = args?.[0];
             const message = input?.message ?? input;
             const author = message?.author;
             if (storage.showInChat === false) return;
-            if (!result || !author || author.bot || BUILTIN_TAGS.has(String(result.tagText).toUpperCase())) return;
+            if (!author || author.bot || BUILTIN_TAGS.has(String(result?.tagText).toUpperCase())) return;
             const channel = ChannelStore?.getChannel?.(message.channel_id ?? message.channelId);
             const guild = GuildStore?.getGuild?.(channel?.guild_id ?? channel?.guildId);
             const tag = resolveTag(guild, channel, author, permissionModule, permissions);
@@ -151,7 +184,7 @@ function installChatPatch() {
                 tagType: undefined
             };
         } catch { return; }
-    }));
+    });
 }
 
 function installTabPatches() {
@@ -160,14 +193,15 @@ function installTabPatches() {
     const GuildMemberStore = (findByProps("getMember", "getMembers") ?? findByStoreName("GuildMemberStore")) as any;
     const GuildRoleStore = (findByProps("getRole", "getRoles") ?? findByStoreName("GuildRoleStore")) as any;
     const permissionModule = findByProps("computePermissions", "canEveryoneRole") as any;
-    const permissions = (constants as any)?.Permissions ?? {};
+    const permissions = PERMISSIONS;
     const View = ReactNative?.View;
     const Text = ReactNative?.Text;
     if (!View || !Text || typeof React?.createElement !== "function") return;
+    if (!GuildStore?.getGuild || !ChannelStore?.getChannel) return;
 
     for (const UserRow of findByTypeNameAll("UserRow") as any[]) {
         if (typeof UserRow?.type !== "function") continue;
-        cancelPatches.push(after("type", UserRow, (args, result) => {
+        patchAfter("type", UserRow, (args, result) => {
             try {
                 const props = args?.[0];
                 const user = props?.user;
@@ -245,12 +279,12 @@ function installTabPatches() {
                     }
                 }, tag.text)));
             } catch { return; }
-        }));
+        });
     }
 
     for (const MessageRow of findByTypeNameAll("MessageRow") as any[]) {
         if (typeof MessageRow?.type !== "function") continue;
-        cancelPatches.push(after("type", MessageRow, (args, result) => {
+        patchAfter("type", MessageRow, (args, result) => {
             try {
                 if (storage.showInChat === false || !result) return;
                 const props = args?.[0];
@@ -305,7 +339,7 @@ function installTabPatches() {
                     }
                 }, tag.text)));
             } catch { return; }
-        }));
+        });
     }
 }
 
@@ -314,17 +348,20 @@ export default {
         storage.useRoleColor ??= true;
         storage.showInChat ??= true;
         storage.showInMemberList ??= true;
-        startTimer = setTimeout(() => {
-            try { installChatPatch(); } catch {}
-            try { installTabPatches(); } catch {}
-        }, 1500);
+        const install = () => {
+            try { installChatPatch(); } catch (error) { console.warn("Staff Tags chat patch", error); }
+            try { installTabPatches(); } catch (error) { console.warn("Staff Tags row patches", error); }
+        };
+        install();
+        startTimer = setInterval(install, 1000);
     },
     onUnload: () => {
-        if (startTimer) clearTimeout(startTimer);
+        if (startTimer) clearInterval(startTimer);
         startTimer = undefined;
         for (const cancel of cancelPatches.splice(0).reverse()) {
             try { cancel(); } catch {}
         }
+        patchedMethods = new WeakMap();
     },
     settings: Settings
 };

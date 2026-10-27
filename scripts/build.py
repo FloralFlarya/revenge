@@ -2,11 +2,13 @@
 import hashlib
 import io
 import json
+import subprocess
 from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced"
+VERSION = "1.0.1"
 
 
 def build():
@@ -18,10 +20,15 @@ def build():
             "format": 1, "id": f"flarya.{name}", "name": old["name"],
             "description": old["description"], "author": "Flarya <435847641041993759>",
             "contributors": [f'{a["name"]} <{a["id"]}>' for a in old["authors"] if a["name"] != "Flarya"],
-            "version": "1.0.0", "dependencies": {"valenced.api": {"version": ">=1 <2"}, "discord": {"version": "*"}},
+            "version": VERSION, "dependencies": {"valenced.api": {"version": ">=1 <2"}, "discord": {"version": "*"}},
             "dist": {"script": "index.js"},
         }
         legacy = (ROOT / name / "index.js").read_text().strip().rstrip(";")
+        if name == "stafftag":
+            legacy = subprocess.check_output([
+                "node", "--disable-warning=ExperimentalWarning", str(ROOT / "scripts/compile-legacy.mjs"),
+                str(ROOT / "stafftag/source/src/index.ts"),
+            ], text=True)
         script = """(function () {
 %s
 let legacy;
@@ -54,10 +61,11 @@ return { default: plugin({
         data = archive.getvalue()
         filename = f'{manifest["id"]}-{manifest["version"]}.zip'
         (ROOT / "valenced" / filename).write_bytes(data)
+        previous = json.loads((ROOT / "valenced/index.json").read_text())["plugins"].get(manifest["id"], {})
         index["plugins"][manifest["id"]] = {
             **{key: manifest[key] for key in ("name", "description", "author", "contributors")},
             "channels": {"latest": manifest["version"]},
-            "versions": {manifest["version"]: {"url": f"{BASE}/{filename}", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "dependencies": manifest["dependencies"]}},
+            "versions": {**previous.get("versions", {}), manifest["version"]: {"url": f"{BASE}/{filename}", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "dependencies": manifest["dependencies"]}},
         }
     (ROOT / "valenced/index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n")
     print("Built 3 Valenced packages and valenced/index.json")

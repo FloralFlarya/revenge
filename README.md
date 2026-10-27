@@ -20,7 +20,7 @@ https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced/index.json
 
 ## Сборка и проверка
 
-Нужны Python 3 и Node.js, сторонних зависимостей нет
+Нужны Python 3 и Node.js 24+, сторонних зависимостей нет
 
 ```sh
 python3 scripts/build.py
@@ -29,7 +29,11 @@ node --test tests/valenced.test.mjs
 
 Сборка создаёт `valenced/index.json` и три ZIP-пакета в `valenced/`
 
-Она использует опубликованные рабочие `index.js` из папок плагинов и адаптер `valenced/runtime.js`, поэтому при обновлении плагинов сначала обновляйте их собранные `index.js`, затем пересобирайте пакеты Valenced и повышайте версию в `scripts/build.py`
+Blocklist и PingColor собираются из опубликованных рабочих `index.js`, Staff Tags — напрямую из `stafftag/source/src/index.ts` через встроенный компилятор TypeScript в Node.js
+
+Общий адаптер находится в `valenced/runtime.js`, текущая версия пакетов — в `scripts/build.py`; при выпуске обновления повышайте её, затем пересобирайте пакеты
+
+Старые ZIP-файлы и версии в каталоге сохраняются для уже установленных клиентов
 
 Адаптер связывает старый API с Valenced: поиск модулей, порядок аргументов патчей, локальные команды, React-настройки, сохранение вложенных данных и освобождение ресурсов при остановке
 
