@@ -8,7 +8,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 def build():

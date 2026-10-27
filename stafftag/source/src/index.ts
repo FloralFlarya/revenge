@@ -1,4 +1,4 @@
-import { findByName, findByProps, findByStoreName, findByTypeNameAll } from "@vendetta/metro";
+import { findAll, findByName, findByProps, findByStoreName, findByTypeNameAll } from "@vendetta/metro";
 import { constants, React, ReactNative } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
@@ -17,6 +17,66 @@ function patchAfter(key: string, parent: any, hook: any) {
     if (!keys) patchedMethods.set(parent, keys = new Set());
     keys.add(key);
     cancelPatches.push(cancel);
+}
+
+function patchComponents(names: string[], hook: any) {
+    const named = (value: any) => names.includes(value?.name) || names.includes(value?.displayName);
+    const matches = (value: any) => named(value) || named(value?.type) || named(value?.render);
+    function patchExport(parent: any, key: string) {
+        const value = parent[key];
+        if (typeof value === "function") patchAfter(key, parent, hook);
+        else if (value && typeof value === "object") {
+            if (typeof value.type === "function") patchAfter("type", value, hook);
+            if (typeof value.render === "function") patchAfter("render", value, hook);
+        }
+    }
+    for (const name of names) {
+        for (const wrapper of findByTypeNameAll(name)) patchAfter("type", wrapper, hook);
+        const namespace = findByName(name, false);
+        if (namespace && typeof namespace === "object") {
+            for (const key of Object.keys(namespace)) {
+                if (matches(namespace[key])) patchExport(namespace, key);
+            }
+        }
+    }
+    // Named exports and memo/forwardRef wrappers do not always have a default export
+    for (const namespace of findAll(value => {
+        if (!value || typeof value !== "object") return false;
+        try { return Object.values(value).some(matches); } catch { return false; }
+    })) {
+        for (const key of Object.keys(namespace)) {
+            if (matches(namespace[key])) patchExport(namespace, key);
+        }
+    }
+}
+
+function memberRowIdentity(props: any, channels: any) {
+    let user: any;
+    let userId: string | undefined;
+    let guildId: string | undefined;
+    let channelId: string | undefined;
+    const seen = new Set();
+    function visit(value: any, depth = 0) {
+        if (!value || typeof value !== "object" || depth > 5 || seen.has(value)) return;
+        seen.add(value);
+        user ??= value.user ?? value.member?.user;
+        if (value.id && (value.username || value.globalName)) user ??= value;
+        userId ??= value.userId ?? value.user_id ?? value.member?.userId;
+        guildId ??= value.guildId ?? value.guild_id ?? value.guild?.id;
+        channelId ??= value.channelId ?? value.channel_id ?? value.channel?.id;
+        for (const [key, child] of Object.entries(value)) {
+            if (/user|member|item|row|data|record|entry|payload|guild|channel/i.test(key)) visit(child, depth + 1);
+        }
+    }
+    visit(props);
+    if (typeof user === "string") { userId ??= user; user = undefined; }
+    const users = findByProps("getCurrentUser", "getUser");
+    user = users?.getUser?.(user?.id ?? userId) ?? user ?? (userId ? { id: userId } : undefined);
+    const selectedChannel = findByStoreName("SelectedChannelStore") ?? findByProps("getChannelId", "getVoiceChannelId");
+    channelId ??= selectedChannel?.getChannelId?.();
+    guildId ??= channels?.getChannel?.(channelId)?.guild_id ?? channels?.getChannel?.(channelId)?.guildId;
+    guildId ??= findByStoreName("SelectedGuildStore")?.getGuildId?.();
+    return { user, guildId };
 }
 
 // Stable Discord permission bits also cover clients whose Constants omit Permissions
@@ -199,13 +259,10 @@ function installTabPatches() {
     if (!View || !Text || typeof React?.createElement !== "function") return;
     if (!GuildStore?.getGuild || !ChannelStore?.getChannel) return;
 
-    for (const UserRow of findByTypeNameAll("UserRow") as any[]) {
-        if (typeof UserRow?.type !== "function") continue;
-        patchAfter("type", UserRow, (args, result) => {
+    patchComponents(["UserRow", "GuildChannelMemberRow", "GuildMemberRow", "MemberRow", "DisplayName"], (args, result) => {
             try {
                 const props = args?.[0];
-                const user = props?.user;
-                const guildId = props?.guildId ?? props?.guild_id;
+                const { user, guildId } = memberRowIdentity(props, ChannelStore);
                 if (storage.showInMemberList === false) return;
                 if (!result || !user || !guildId) return;
                 const guild = GuildStore?.getGuild?.(guildId);
@@ -213,15 +270,18 @@ function installTabPatches() {
                 if (!tag) return;
 
                 const labelRoot = result?.props?.label ?? result;
-                const nameContainer = findInReactTree(labelRoot, node =>
-                    Array.isArray(node?.props?.children) && node.props.children.some((child: any) =>
-                        typeof child === "string" || typeof child?.props?.children === "string"
-                    )
-                );
+                const member = GuildMemberStore?.getMember?.(guild.id, user.id) ?? props?.member ?? props?.guildMember;
+                const knownNames = [member?.nick, props?.name, user?.globalName, user?.global_name, user?.username].filter(Boolean);
+                const nameContainer = findInReactTree(labelRoot, node => {
+                    const children = node?.props?.children;
+                    return Array.isArray(children) && children.some((child: any) => {
+                        const text = typeof child === "string" ? child : child?.props?.children;
+                        return typeof text === "string" && (!knownNames.length || knownNames.includes(text));
+                    });
+                });
                 if (!nameContainer?.props) return;
                 if (nameContainer.props.children.some((child: any) => child?.props?.staffTagsText)) return;
 
-                const member = GuildMemberStore?.getMember?.(guild.id, user.id) ?? props?.member ?? props?.guildMember;
                 const background = storage.useRoleColor ? resolveRoleColor(guild, member, props) ?? tag.color : tag.color;
                 const processColor = ReactNative?.processColor;
                 const flatten = ReactNative?.StyleSheet?.flatten;
@@ -279,8 +339,7 @@ function installTabPatches() {
                     }
                 }, tag.text)));
             } catch { return; }
-        });
-    }
+    });
 
     for (const MessageRow of findByTypeNameAll("MessageRow") as any[]) {
         if (typeof MessageRow?.type !== "function") continue;

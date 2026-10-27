@@ -8,6 +8,7 @@ const runtime = readFileSync(new URL('../valenced/runtime.js', import.meta.url),
 function environment({ fakeTimers = false } = {}) {
     const modules = [{ getBuiltInCommands: () => [{ id: '-1', type: 1 }] }];
     const cleanups = [];
+    const subscriptions = new Set();
     const saved = [];
     const React = { createElement: (type, props, ...children) => {
         assert.notEqual(typeof type, 'number', 'React cannot render an asset ID as a component');
@@ -39,6 +40,16 @@ function environment({ fakeTimers = false } = {}) {
             },
             lookupModule: (predicate, options) => [...lookupModules(predicate, options)][0] ?? [undefined, undefined],
             lookupModules,
+            getModules(predicate, callback, options) {
+                const match = [...lookupModules(predicate, options)][0];
+                if (match) {
+                    queueMicrotask(() => callback(...match));
+                    return () => {};
+                }
+                const subscription = { predicate, callback };
+                subscriptions.add(subscription);
+                return () => subscriptions.delete(subscription);
+            },
         } },
         patcher: {
             instead(parent, key, hook) {
@@ -64,7 +75,16 @@ function environment({ fakeTimers = false } = {}) {
         setInterval: fakeTimers ? schedule : setInterval, clearInterval: fakeTimers ? callback => timers.delete(callback) : clearInterval,
         valenced: v, plugin: value => value });
     const compat = vm.runInContext(`${runtime}; createCompatibility`, context)(api);
-    return { api, v, modules, cleanups, saved, compat, context, timers, tick: () => { for (const callback of [...timers]) callback(); } };
+    function publish(value) {
+        modules.push(value);
+        for (const subscription of [...subscriptions]) {
+            const match = subscription.predicate(value) ? value : value.default && subscription.predicate(value.default) ? value.default : undefined;
+            if (!match) continue;
+            subscriptions.delete(subscription);
+            subscription.callback(match, modules.length - 1);
+        }
+    }
+    return { api, v, modules, cleanups, saved, compat, context, timers, subscriptions, publish, tick: () => { for (const callback of [...timers]) callback(); } };
 }
 
 function packageScript(id) {
@@ -167,6 +187,49 @@ test('Staff Tags patches late screens once, tags ordinary humans and restores me
     assert.equal(timers.size, 0);
 });
 
+test('Staff Tags handles channel member rows with nested props and forwarded named exports', async () => {
+    const { api, context, modules, cleanups, tick } = environment({ fakeTimers: true });
+    const options = vm.runInContext(packageScript('flarya.stafftag'), context).default;
+    await options.start(api);
+    const user = { id: 'member', username: 'Alice' };
+    const guild = { id: 'guild', ownerId: 'owner', roles: { guild: { permissions: '0' }, moderator: { permissions: '8192' } } };
+    function memberTree() {
+        return { props: { label: { props: { children: [{ props: { children: 'Alice' } }] } } } };
+    }
+    const defaultRow = { default: function GuildChannelMemberRow() { return memberTree(); } };
+    const forwarded = { default: { displayName: 'GuildChannelMemberRow', render() { return memberTree(); } } };
+    const namedRow = { GuildChannelMemberRow: function GuildChannelMemberRow() { return memberTree(); } };
+    const originalDefault = defaultRow.default;
+    const originalRender = forwarded.default.render;
+    const originalNamed = namedRow.GuildChannelMemberRow;
+    const props = { data: { member: { user }, channelId: 'channel' } };
+    // Rows may load before their stores; the next scan must still attach working hooks
+    modules.push(defaultRow, forwarded, namedRow);
+    tick();
+    modules.push(
+        { getName: () => 'GuildStore', getGuild: () => guild },
+        { getName: () => 'ChannelStore', getChannel: () => ({ guild_id: 'guild' }) },
+        { getMember: () => ({ roles: ['moderator'] }), getMembers() {} },
+    );
+    try {
+        tick();
+        for (const render of [defaultRow.default, forwarded.default.render, namedRow.GuildChannelMemberRow]) {
+            const result = render(props);
+            const children = result.props.label.props.children;
+            assert.equal(children.length, 2);
+            assert.equal(children[1].props.staffTagsText, 'MOD');
+        }
+        const patched = defaultRow.default;
+        tick();
+        assert.equal(defaultRow.default, patched);
+    } finally {
+        await Promise.all(cleanups.map(fn => fn()));
+    }
+    assert.equal(defaultRow.default, originalDefault);
+    assert.equal(forwarded.default.render, originalRender);
+    assert.equal(namedRow.GuildChannelMemberRow, originalNamed);
+});
+
 test('adapts argument order, this binding, undefined return and unpatching', () => {
     const { compat } = environment();
     const target = { factor: 3, multiply(value) { return value * this.factor; } };
@@ -206,6 +269,42 @@ test('local commands register, execute and unregister', async () => {
     unregister();
     assert.equal(modules[0].getBuiltInCommands(1).length, 1);
     cleanups.forEach(fn => fn());
+});
+
+test('Blocklist starts before Discord commands load and binds all queued commands later', async () => {
+    const { api, context, modules, cleanups, subscriptions, publish } = environment({ fakeTimers: true });
+    modules.length = 0;
+    const options = vm.runInContext(packageScript('flarya.blocklist'), context).default;
+    await options.start(api);
+    assert.equal(subscriptions.size, 1);
+    const commandModule = { getBuiltInCommands: () => [{ id: '-50', type: 1 }] };
+    const original = commandModule.getBuiltInCommands;
+    publish(commandModule);
+    try {
+        const commands = commandModule.getBuiltInCommands(1);
+        assert.deepEqual(Array.from(commands, command => command.name).filter(Boolean), ['block', 'unblock', 'blockdebug']);
+        assert.equal(new Set(commands.map(command => command.id)).size, 4);
+        assert.ok(commands.filter(command => command.name).every(command => Number(command.id) < -50));
+        assert.equal(subscriptions.size, 0);
+    } finally {
+        await Promise.all(cleanups.map(fn => fn()));
+    }
+    assert.equal(commandModule.getBuiltInCommands, original);
+});
+
+test('stopping while waiting cancels command discovery, including an already queued callback', async () => {
+    const { api, context, modules, cleanups, subscriptions, publish } = environment({ fakeTimers: true });
+    modules.length = 0;
+    const options = vm.runInContext(packageScript('flarya.blocklist'), context).default;
+    await options.start(api);
+    const queuedCallback = [...subscriptions][0].callback;
+    await Promise.all(cleanups.map(fn => fn()));
+    assert.equal(subscriptions.size, 0);
+    const commandModule = { getBuiltInCommands: () => [] };
+    const original = commandModule.getBuiltInCommands;
+    publish(commandModule);
+    queuedCallback(commandModule);
+    assert.equal(commandModule.getBuiltInCommands, original);
 });
 
 test('packages match catalogue hashes, manifests and Valenced lifecycle', async () => {

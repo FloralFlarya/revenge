@@ -9,7 +9,7 @@
       "author": "Flarya <435847641041993759>",
       "contributors": [],
       "channels": {
-        "latest": "1.0.1"
+        "latest": "1.0.2"
       },
       "versions": {
         "1.0.0": {
@@ -37,6 +37,19 @@
               "version": "*"
             }
           }
+        },
+        "1.0.2": {
+          "url": "https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced/flarya.blocklist-1.0.2.zip",
+          "sha256": "cf2a3c9b30061a2fd782f40a14a06fa255a6cc5e241f06b8786d6f25e52eb129",
+          "size": 9651,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
         }
       }
     },
@@ -46,7 +59,7 @@
       "author": "Flarya <435847641041993759>",
       "contributors": [],
       "channels": {
-        "latest": "1.0.1"
+        "latest": "1.0.2"
       },
       "versions": {
         "1.0.0": {
@@ -74,6 +87,19 @@
               "version": "*"
             }
           }
+        },
+        "1.0.2": {
+          "url": "https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced/flarya.pingcolor-1.0.2.zip",
+          "sha256": "dece8539f4c97d000a40c933bce0a43a16c2ea8600f647e3aa054130cb3947ac",
+          "size": 5126,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
         }
       }
     },
@@ -86,7 +112,7 @@
         "siguma <737597276339437578>"
       ],
       "channels": {
-        "latest": "1.0.1"
+        "latest": "1.0.2"
       },
       "versions": {
         "1.0.0": {
@@ -106,6 +132,19 @@
           "url": "https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced/flarya.stafftag-1.0.1.zip",
           "sha256": "2242cfd39048151aefa749ea7efb3721935af5614b35c0779e126bbebb5553f9",
           "size": 7207,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.2": {
+          "url": "https://raw.githubusercontent.com/FloralFlarya/revenge/main/valenced/flarya.stafftag-1.0.2.zip",
+          "sha256": "e9435e5a807ebf3546ffd2caaece4584fb22f5ef61c92e0f2764ec32d9eb7784",
+          "size": 8135,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"

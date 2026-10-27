@@ -60,7 +60,7 @@ function createCompatibility(api) {
             if (!node || typeof node !== 'object' || seen.has(node)) return;
             seen.add(node);
             if (predicate(node)) return node;
-            const children = Array.isArray(node) ? node : [node.props?.children];
+            const children = Array.isArray(node) ? node : [node.props?.children, node.props?.label, node.props?.title];
             for (const child of children) {
                 const result = visit(child);
                 if (result) return result;
@@ -84,20 +84,49 @@ function createCompatibility(api) {
     }
     const commands = [];
     let removeCommands;
-    function registerCommand(command) {
-        const module = findByProps('getBuiltInCommands');
-        if (!module) throw new Error('Discord command API is unavailable');
-        if (!removeCommands) {
-            removeCommands = after('getBuiltInCommands', module, ([types], result) => [
-                ...result,
-                ...commands.filter(item => (Array.isArray(types) ? types : [types]).includes(item.type)),
-            ]);
-            api.cleanup(() => { removeCommands(); commands.length = 0; });
+    let unsubscribeCommands;
+    let commandModule;
+    let discoveringCommands = false;
+    let commandsStopped = false;
+    function builtinCommands(module) {
+        try { return module.getBuiltInCommands(1, true, false); }
+        catch { return module.getBuiltInCommands([1, 2, 3], true, false); }
+    }
+    function bindCommands(module) {
+        if (commandsStopped || removeCommands || !commands.length) return;
+        const builtins = builtinCommands(module);
+        let id = Math.min(-1, ...builtins.map(item => Number(item.id)).filter(Number.isFinite));
+        for (const command of commands) command.id = String(--id);
+        commandModule = module;
+        removeCommands = after('getBuiltInCommands', module, ([types], result) => [
+            ...result,
+            ...commands.filter(item => (Array.isArray(types) ? types : [types]).includes(item.type)),
+        ]);
+    }
+    function discoverCommands() {
+        if (discoveringCommands) {
+            if (!removeCommands) {
+                const module = findByProps('getBuiltInCommands');
+                if (module) bindCommands(module);
+            }
+            return;
         }
-        let builtins;
-        try { builtins = module.getBuiltInCommands(1, true, false); }
-        catch { builtins = module.getBuiltInCommands([1, 2, 3], true, false); }
-        const ids = builtins.map(item => Number(item.id)).filter(Number.isFinite);
+        discoveringCommands = true;
+        api.cleanup(() => {
+            commandsStopped = true;
+            unsubscribeCommands?.();
+            removeCommands?.();
+            commands.length = 0;
+        });
+        const module = findByProps('getBuiltInCommands');
+        if (module) bindCommands(module);
+        else unsubscribeCommands = v.modules.finders.getModules(
+            filters.withProps('getBuiltInCommands'), bindCommands, { cached: false },
+        );
+    }
+    function registerCommand(command) {
+        const existing = commandModule ? builtinCommands(commandModule) : commands;
+        const ids = existing.map(item => Number(item.id)).filter(Number.isFinite);
         Object.assign(command, {
             id: String(Math.min(-1, ...ids) - 1), applicationId: '-1', type: 1, inputType: 0,
             displayName: command.name, untranslatedName: command.name,
@@ -115,6 +144,7 @@ function createCompatibility(api) {
             });
         };
         commands.push(command);
+        discoverCommands();
         return () => { const index = commands.indexOf(command); if (index >= 0) commands.splice(index, 1); };
     }
     return {
