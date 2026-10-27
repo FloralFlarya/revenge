@@ -1,5 +1,7 @@
 # StaffTags for Revenge
 
+Для Valenced используйте [инструкцию установки каталога](../README.md#установка-в-valenced)
+
 Плагин StaffTags для мобильного Discord-клиента с модификацией Revenge.
 
 ## Установка
@@ -13,7 +15,7 @@ https://floralflarya.github.io/revenge/stafftag/
 Если GitHub Pages ещё не включён, можно использовать прямой адрес:
 
 ```text
-https://raw.githubusercontent.com/revenge/floralflarya/stafftag/main/
+https://raw.githubusercontent.com/FloralFlarya/revenge/main/stafftag/
 ```
 
 Плагин показывает должности исключительно по реальным разрешениям пользователя. Названия ролей не проверяются.
